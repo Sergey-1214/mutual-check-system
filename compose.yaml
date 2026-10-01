@@ -1,0 +1,59 @@
+name: mutual-checks
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: mutual_checks
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mutual_checks"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/mutual_checks
+      SUBMISSION_UPLOAD_DIR: /app/uploads/submissions
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-development-secret-key-change-me}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      REFRESH_COOKIE_NAME: ${REFRESH_COOKIE_NAME:-refresh_token}
+      REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-false}
+      JWT_ISSUER: mutual-checks-api
+      JWT_AUDIENCE: mutual-checks-frontend
+      CORS_ORIGINS: '["http://localhost:5173"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      - submission_data:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  submission_data:
